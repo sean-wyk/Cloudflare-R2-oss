@@ -1,5 +1,5 @@
 <template>
-  <div class="main" @dragenter.prevent @dragover.prevent @drop.prevent="onDrop">
+  <div class="main" @dragenter.prevent @dragover.prevent @drop.prevent="onDrop" @paste.prevent="onPaste">
     <progress
       v-if="uploadProgress !== null"
       :value="uploadProgress"
@@ -495,16 +495,19 @@ export default {
       // 如果是文件夹,需要移除_$folder$后缀
       const finalFileName = fileName.endsWith('_$folder$') ? fileName.slice(0, -9) : fileName;
       
-      // 修复：正确处理目标路径，避免双斜杠
-      const normalizedPath = targetPath === '' ? '' : (targetPath.endsWith('/') ? targetPath : targetPath + '/');
-      
       try {
         // 如果是目录（以_$folder$结尾），则需要移动整个目录内容
         if (key.endsWith('_$folder$')) {
           // 获取源目录的基础路径（移除_$folder$后缀）
           const sourceBasePath = key.slice(0, -9);
-          // 获取目标目录的基础路径，修复根目录的情况
-          const targetBasePath = normalizedPath + finalFileName + '/';
+          
+          // 构建目标路径（确保不会出现双斜杠）
+          const targetBasePath = targetPath 
+            ? (targetPath.endsWith('/') ? targetPath + finalFileName : targetPath + '/' + finalFileName)
+            : finalFileName;
+          
+          // 确保目标路径以/结尾，并移除多余的斜杠
+          const normalizedTargetPath = (targetBasePath + '/').replace(/\/{2,}/g, '/');
           
           // 递归获取所有子文件和子目录
           const allItems = await this.getAllItems(sourceBasePath);
@@ -513,12 +516,24 @@ export default {
           const totalItems = allItems.length;
           let processedItems = 0;
           
+          // 首先创建目标文件夹
+          try {
+            // 创建目标文件夹标记
+            const folderMarker = targetBasePath.replace(/\/{2,}/g, '/') + '_$folder$';
+            await axios.put(`/api/write/items/${folderMarker}`, '');
+          } catch (error) {
+            console.error('创建目标文件夹失败:', error);
+            throw error; // 如果创建文件夹失败，终止整个移动操作
+          }
+          
           // 移动所有项目
           for (const item of allItems) {
-            const relativePath = item.key.substring(sourceBasePath.length);
-            const newPath = targetBasePath + relativePath;
-            
             try {
+              const relativePath = item.key.substring(sourceBasePath.length);
+              // 确保新路径不会以/开头，并且移除所有连续的斜杠
+              const newPath = (normalizedTargetPath + (relativePath.startsWith('/') ? relativePath.slice(1) : relativePath))
+                .replace(/\/{2,}/g, '/');
+              
               // 复制到新位置
               await this.copyPaste(item.key, newPath);
               // 删除原位置
@@ -532,17 +547,25 @@ export default {
             }
           }
           
-          // 移动目录标记
-          const targetFolderPath = targetBasePath.slice(0, -1) + '_$folder$';
-          await this.copyPaste(key, targetFolderPath);
-          await axios.delete(`/api/write/items/${key}`);
+          // 删除原始目录标记
+          try {
+            await axios.delete(`/api/write/items/${key}`);
+          } catch (error) {
+            console.error('删除原始目录标记失败:', error);
+          }
           
           // 清除进度
           this.uploadProgress = null;
         } else {
-          // 单文件移动逻辑，修复根目录的情况
-          const targetFilePath = normalizedPath + finalFileName;
-          await this.copyPaste(key, targetFilePath);
+          // 单文件移动逻辑
+          const targetFilePath = targetPath 
+            ? (targetPath.endsWith('/') ? targetPath + finalFileName : targetPath + '/' + finalFileName)
+            : finalFileName;
+          
+          // 移除所有连续的斜杠
+          const normalizedPath = targetFilePath.replace(/\/{2,}/g, '/');
+          
+          await this.copyPaste(key, normalizedPath);
           await axios.delete(`/api/write/items/${key}`);
         }
         
@@ -551,6 +574,7 @@ export default {
       } catch (error) {
         console.error('移动失败:', error);
         alert('移动失败,请检查目标路径是否正确');
+        this.uploadProgress = null; // 确保在错误时清除进度条
       }
     },
 
@@ -600,6 +624,23 @@ export default {
       }));
       this.uploadQueue.push(...uploadTasks);
       setTimeout(() => this.processUploadQueue());
+    },
+
+    onPaste(event) {
+      const items = event.clipboardData?.items;
+      if (!items) return;
+      
+      const files = [];
+      for (const item of items) {
+        if (item.kind === 'file') {
+          const file = item.getAsFile();
+          if (file) files.push(file);
+        }
+      }
+      
+      if (files.length > 0) {
+        this.uploadFiles(files);
+      }
     },
   },
 
