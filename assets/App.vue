@@ -11,14 +11,21 @@
       @createFolder="createFolder"
     ></UploadPopup>
     <button class="upload-button circle" @click="showUploadPopup = true">
-      <img
-        style="filter: invert(100%)"
-        src="https://cdnjs.cloudflare.com/ajax/libs/material-design-icons/4.0.0/png/file/upload_file/materialicons/36dp/2x/baseline_upload_file_black_36dp.png"
-        alt="Upload"
+      <!-- 替换为内联SVG上传图标 -->
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
         width="36"
         height="36"
+        alt="Upload"
+        style="filter: invert(100%)"
         @contextmenu.prevent
-      />
+      >
+        <path
+          fill="#000000"
+          d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"
+        />
+      </svg>
     </button>
     <div class="app-bar">
       <input type="search" v-model="search" aria-label="Search" />
